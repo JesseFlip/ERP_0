@@ -1,0 +1,263 @@
+// PropertyOps ERP — Phase 1 (Invoice Composer) data model.
+// Every business table is org-scoped from day one (see spec: "Multi-tenancy from day one").
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & auth
+// ---------------------------------------------------------------------------
+
+model Org {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // QuickBooks Online connection (one company file per org for v1)
+  qboRealmId          String?
+  qboAccessToken       String? // encrypted at rest via lib/crypto
+  qboRefreshToken      String? // encrypted at rest via lib/crypto
+  qboAccessTokenExpiresAt  DateTime?
+  qboRefreshTokenExpiresAt DateTime?
+  qboConnectedAt       DateTime?
+  qboDisconnectedAt     DateTime?
+
+  users        User[]
+  customers    Customer[]
+  catalogItems CatalogItem[]
+  jobs         Job[]
+  invoices     Invoice[]
+  syncJobs     SyncJob[]
+
+  @@map("orgs")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+}
+
+model User {
+  id           String   @id @default(cuid())
+  orgId        String
+  org          Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole @default(OWNER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([orgId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Customers (mirrored from QBO, created there when new)
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id            String   @id @default(cuid())
+  orgId         String
+  org           Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  qboCustomerId String?
+  name          String
+  email         String?
+  phone         String?
+  billingLine1  String?
+  billingCity   String?
+  billingState  String?
+  billingZip    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  jobs     Job[]
+  invoices Invoice[]
+
+  @@unique([orgId, qboCustomerId])
+  @@index([orgId])
+  @@map("customers")
+}
+
+// ---------------------------------------------------------------------------
+// Catalog / price list — shared service now so Phase 2 estimating can reuse it
+// ---------------------------------------------------------------------------
+
+enum CatalogItemKind {
+  SERVICE
+  MATERIAL
+}
+
+model CatalogItem {
+  id          String          @id @default(cuid())
+  orgId       String
+  org         Org             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  qboItemId   String?
+  name        String
+  description String?
+  kind        CatalogItemKind @default(SERVICE)
+  unit        String          @default("ea")
+  defaultRate Decimal         @db.Decimal(12, 2)
+  active      Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  invoiceLines InvoiceLine[]
+
+  @@unique([orgId, qboItemId])
+  @@index([orgId])
+  @@map("catalog_items")
+}
+
+// ---------------------------------------------------------------------------
+// Jobs — deliberately minimal per spec ("name, customer, done-date, notes")
+// ---------------------------------------------------------------------------
+
+enum JobStatus {
+  DONE_NOT_INVOICED
+  INVOICED
+  DISMISSED
+}
+
+model Job {
+  id               String    @id @default(cuid())
+  orgId            String
+  org              Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customerId       String
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  name             String
+  doneDate         DateTime
+  notes            String?
+  status           JobStatus @default(DONE_NOT_INVOICED)
+  dismissedReason  String?
+  invoiceId        String?   @unique
+  invoice          Invoice?  @relation(fields: [invoiceId], references: [id])
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  attachments Attachment[]
+
+  @@index([orgId, status])
+  @@map("jobs")
+}
+
+// ---------------------------------------------------------------------------
+// Invoices
+// ---------------------------------------------------------------------------
+
+enum InvoiceStatus {
+  DRAFT       // being composed locally, not yet finalized
+  NOT_POSTED  // finalized locally, QBO push pending or failed
+  POSTED      // created in QBO, no customer-visible status yet
+  SENT
+  VIEWED
+  PAID
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  orgId          String
+  org            Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer      @relation(fields: [customerId], references: [id])
+  qboInvoiceId   String?
+  qboSyncToken   String?
+  idempotencyKey String        @unique @default(cuid())
+  status         InvoiceStatus @default(DRAFT)
+  subtotal       Decimal       @default(0) @db.Decimal(12, 2)
+  taxAmount      Decimal       @default(0) @db.Decimal(12, 2)
+  total          Decimal       @default(0) @db.Decimal(12, 2)
+  memo           String?
+  finalizedAt    DateTime?
+  lastSyncedAt   DateTime?
+  lastSyncError  String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  lines       InvoiceLine[]
+  attachments Attachment[]
+  syncJobs    SyncJob[]
+  job         Job?
+
+  @@unique([orgId, qboInvoiceId])
+  @@index([orgId, status])
+  @@map("invoices")
+}
+
+enum InvoiceLineType {
+  STANDARD
+  CHANGE_ORDER
+}
+
+model InvoiceLine {
+  id            String          @id @default(cuid())
+  invoiceId     String
+  invoice       Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  catalogItemId String?
+  catalogItem   CatalogItem?    @relation(fields: [catalogItemId], references: [id])
+  description   String
+  quantity      Decimal         @default(1) @db.Decimal(12, 2)
+  rate          Decimal         @db.Decimal(12, 2)
+  amount        Decimal         @db.Decimal(12, 2)
+  lineType      InvoiceLineType @default(STANDARD)
+  notes         String?
+  sortOrder     Int             @default(0)
+
+  @@index([invoiceId])
+  @@map("invoice_lines")
+}
+
+// ---------------------------------------------------------------------------
+// Attachments (before/after photos, job notes evidence)
+// ---------------------------------------------------------------------------
+
+model Attachment {
+  id        String   @id @default(cuid())
+  jobId     String?
+  job       Job?     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  url       String
+  caption   String?
+  createdAt DateTime @default(now())
+
+  @@index([jobId])
+  @@index([invoiceId])
+  @@map("attachments")
+}
+
+// ---------------------------------------------------------------------------
+// QBO sync retry queue — background-job-backed so pushes are never silent
+// ---------------------------------------------------------------------------
+
+enum SyncJobStatus {
+  PENDING
+  RUNNING
+  FAILED
+  SUCCEEDED
+}
+
+model SyncJob {
+  id            String        @id @default(cuid())
+  orgId         String
+  org           Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invoiceId     String
+  invoice       Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  status        SyncJobStatus @default(PENDING)
+  attempts      Int           @default(0)
+  lastError     String?
+  nextAttemptAt DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([orgId])
+  @@map("sync_jobs")
+}
