@@ -49,14 +49,15 @@ async function main() {
     }
   }
 
+  // Left qboCustomerId unset: these are local-only until a real QBO connection syncs
+  // them, and the Customers page uses that field to show "Synced" vs "Local only".
   const customerNames = ["Alvarez Residence", "Maple Street HOA", "Thornton Family Trust"];
   const customers = [];
   for (const name of customerNames) {
-    const customer = await prisma.customer.upsert({
-      where: { orgId_qboCustomerId: { orgId: org.id, qboCustomerId: `demo-${name}` } },
-      update: {},
-      create: { orgId: org.id, name, qboCustomerId: `demo-${name}` },
-    });
+    let customer = await prisma.customer.findFirst({ where: { orgId: org.id, name } });
+    if (!customer) {
+      customer = await prisma.customer.create({ data: { orgId: org.id, name } });
+    }
     customers.push(customer);
   }
 
