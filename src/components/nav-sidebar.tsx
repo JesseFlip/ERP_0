@@ -2,16 +2,30 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Inbox, FileText, Package, Users, Settings, LogOut } from "lucide-react";
+import {
+  LayoutDashboard,
+  Inbox,
+  FileText,
+  Package,
+  Users,
+  Settings,
+  LogOut,
+  FileSignature,
+  CalendarDays,
+  HardHat,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logoutAction } from "@/app/logout-action";
 
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/estimates", label: "Estimates", icon: FileSignature },
+  { href: "/schedule", label: "Schedule", icon: CalendarDays },
   { href: "/queue", label: "Uninvoiced queue", icon: Inbox },
   { href: "/invoices", label: "Invoices", icon: FileText },
   { href: "/catalog", label: "Catalog", icon: Package },
   { href: "/customers", label: "Customers", icon: Users },
+  { href: "/crews", label: "Crews", icon: HardHat },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
