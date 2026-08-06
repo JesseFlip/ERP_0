@@ -159,12 +159,52 @@ routers and UI are exercised via manual + agent-driven browser smoke tests inste
 
 ## Deploying
 
-Target is Vercel (per the spec's "boring, cheap, one-person maintainable" stack) with
-a managed Postgres (Neon/Supabase). Set every variable from `.env.example` in the
-Vercel project, then `vercel.json`'s cron picks up the retry queue automatically —
-just add a `CRON_SECRET` env var and Vercel signs its cron requests with it.
+### Vercel (managed)
+
+Set every variable from `.env.example` in the Vercel project, plus a managed
+Postgres `DATABASE_URL` (Neon/Supabase). `vercel.json`'s cron picks up the retry
+queue automatically — Hobby plan is limited to daily schedules, bump it to
+every 10-15 minutes if you're on Pro.
 
 ```bash
 npm run build   # `next build`, also type-checks
 npm run lint
 ```
+
+### Self-hosting (Docker / Tailscale / CapRover)
+
+`Dockerfile` builds a lean, self-contained image via Next.js `output: "standalone"`
+— works unmodified on ARM64 (Raspberry Pi, Apple Silicon) or x86_64, since Docker
+just builds for whatever host it runs on. Three ways to run it, in order of
+how much infrastructure they need:
+
+**1. `docker compose` — local machine or any always-on box, fronted by Tailscale.**
+
+```bash
+cp .env.example .env   # fill in AUTH_SECRET, CRON_SECRET (openssl rand -base64 32)
+docker compose up -d --build
+
+# One-time: create tables + demo data. Targets the `builder` stage since the
+# lean runtime image deliberately excludes the Prisma CLI to stay small.
+docker compose --profile tools run --rm migrate npx prisma migrate deploy
+docker compose --profile tools run --rm migrate npm run db:seed   # optional
+
+# Expose it only to your tailnet (no public port, real HTTPS via MagicDNS):
+tailscale serve https / 3000
+```
+
+Nobody outside your tailnet can reach it — no public URL to leak, scan, or index.
+Invite a specific person by sharing tailnet access to just this node rather than
+your whole network (Tailscale's admin console → Machines → share).
+
+**2. CapRover** (`captain-definition` → this same `Dockerfile`) — once you want a
+proper deploy workflow (git push or CLI deploy, one-click SSL, a dashboard)
+instead of babysitting `docker compose` by hand. Point CapRover at a Postgres
+(its one-click-apps gallery has one, or keep using `docker compose`'s `db`
+service on the same host), set the same env vars in the app's **App Configs**,
+and deploy. Run migrations the same way as above — plain `docker build --target
+builder` + `docker run` against whatever host CapRover is running on, independent
+of CapRover's own orchestration.
+
+**3. A bare VPS/server** — same Dockerfile, same `docker compose` flow as #1,
+just with a public IP and your own reverse proxy/TLS instead of Tailscale.

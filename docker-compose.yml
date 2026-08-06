@@ -10,6 +10,52 @@ services:
       - "5432:5432"
     volumes:
       - propertyops_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # The app itself — only needed for self-hosting (Tailscale, CapRover, a bare
+  # VPS). Leave this out and just run `db` if you're developing locally with
+  # `npm run dev`. See README's "Self-hosting" section.
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/propertyops?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in .env — see .env.example}
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env — see .env.example}
+      QBO_CLIENT_ID: ${QBO_CLIENT_ID:-}
+      QBO_CLIENT_SECRET: ${QBO_CLIENT_SECRET:-}
+      QBO_ENVIRONMENT: ${QBO_ENVIRONMENT:-sandbox}
+      QBO_REDIRECT_URI: ${QBO_REDIRECT_URI:-}
+      QBO_WEBHOOK_VERIFIER_TOKEN: ${QBO_WEBHOOK_VERIFIER_TOKEN:-}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+    ports:
+      - "3000:3000"
+    volumes:
+      - propertyops_uploads:/app/public/uploads
+
+  # One-off: `docker compose run --rm migrate npx prisma migrate deploy`
+  # and `docker compose run --rm migrate npm run db:seed`. Targets the
+  # `builder` stage since the lean runtime image (`app`, above) deliberately
+  # excludes the Prisma CLI. Not started by `docker compose up` (no `depends_on`
+  # from anything, and it exits immediately with no command of its own).
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/propertyops?schema=public
 
 volumes:
   propertyops_db:
+  propertyops_uploads:
