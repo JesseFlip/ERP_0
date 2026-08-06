@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PropertyOps — Invoice Composer",
-  description: "From job notes to a QuickBooks-posted invoice in under 2 minutes.",
+  title: "PropertyOps",
+  description: "Estimate, schedule, and run a job in the field, then bill it to QuickBooks in under 2 minutes.",
 };
 
 export default function RootLayout({

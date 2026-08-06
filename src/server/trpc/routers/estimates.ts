@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
+import { computeLineAmount, computeTotals } from "@/lib/totals";
+import {
+  canConvertEstimateToJob,
+  canEditEstimate,
+  canRespondToEstimate,
+  canSendEstimate,
+} from "@/lib/status-transitions";
 
 const lineInput = z.object({
   catalogItemId: z.string().optional(),
@@ -8,11 +15,6 @@ const lineInput = z.object({
   quantity: z.coerce.number().positive().default(1),
   rate: z.coerce.number().min(0),
 });
-
-function computeTotals(lines: { quantity: number; rate: number }[]) {
-  const subtotal = lines.reduce((sum, l) => sum + l.quantity * l.rate, 0);
-  return { subtotal, total: subtotal };
-}
 
 export const estimatesRouter = router({
   list: protectedProcedure.query(({ ctx }) => {
@@ -61,7 +63,7 @@ export const estimatesRouter = router({
               description: line.description,
               quantity: line.quantity,
               rate: line.rate,
-              amount: line.quantity * line.rate,
+              amount: computeLineAmount(line.quantity, line.rate),
               sortOrder: i,
             })),
           },
@@ -84,7 +86,7 @@ export const estimatesRouter = router({
         where: { id: input.estimateId, orgId: ctx.orgId },
       });
       if (!estimate) throw new TRPCError({ code: "NOT_FOUND" });
-      if (estimate.status !== "DRAFT") {
+      if (!canEditEstimate(estimate.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only draft estimates can be edited" });
       }
 
@@ -99,7 +101,7 @@ export const estimatesRouter = router({
             description: line.description,
             quantity: line.quantity,
             rate: line.rate,
-            amount: line.quantity * line.rate,
+            amount: computeLineAmount(line.quantity, line.rate),
             sortOrder: i,
           })),
         }),
@@ -118,7 +120,7 @@ export const estimatesRouter = router({
   send: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const estimate = await ctx.prisma.estimate.findUnique({ where: { id: input.id, orgId: ctx.orgId } });
     if (!estimate) throw new TRPCError({ code: "NOT_FOUND" });
-    if (estimate.status !== "DRAFT") {
+    if (!canSendEstimate(estimate.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Only draft estimates can be sent" });
     }
     return ctx.prisma.estimate.update({
@@ -132,7 +134,7 @@ export const estimatesRouter = router({
     .mutation(async ({ ctx, input }) => {
       const estimate = await ctx.prisma.estimate.findUnique({ where: { id: input.id, orgId: ctx.orgId } });
       if (!estimate) throw new TRPCError({ code: "NOT_FOUND" });
-      if (estimate.status !== "SENT") {
+      if (!canRespondToEstimate(estimate.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only sent estimates can be responded to" });
       }
       return ctx.prisma.estimate.update({
@@ -154,7 +156,7 @@ export const estimatesRouter = router({
         include: { lines: true, job: true },
       });
       if (!estimate) throw new TRPCError({ code: "NOT_FOUND" });
-      if (estimate.status !== "ACCEPTED") {
+      if (!canConvertEstimateToJob(estimate.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only accepted estimates can convert to a job" });
       }
       if (estimate.job) {

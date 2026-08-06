@@ -2,6 +2,13 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
 import { pushInvoiceToQbo } from "@/lib/qbo/sync";
+import { computeLineAmount, computeTotals } from "@/lib/totals";
+import {
+  canCreateInvoiceFromJob,
+  canEditInvoiceLines,
+  canFinalizeInvoice,
+  canRetrySyncInvoice,
+} from "@/lib/status-transitions";
 
 const lineInput = z.object({
   catalogItemId: z.string().optional(),
@@ -11,11 +18,6 @@ const lineInput = z.object({
   lineType: z.enum(["STANDARD", "CHANGE_ORDER"]).default("STANDARD"),
   notes: z.string().optional(),
 });
-
-function computeTotals(lines: { quantity: number; rate: number }[]) {
-  const subtotal = lines.reduce((sum, l) => sum + l.quantity * l.rate, 0);
-  return { subtotal, total: subtotal };
-}
 
 export const invoicesRouter = router({
   list: protectedProcedure.query(({ ctx }) => {
@@ -55,7 +57,7 @@ export const invoicesRouter = router({
       if (input.jobId) {
         const job = await ctx.prisma.job.findUnique({ where: { id: input.jobId, orgId: ctx.orgId } });
         if (!job) throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
-        if (job.status !== "DONE_NOT_INVOICED") {
+        if (!canCreateInvoiceFromJob(job.status)) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Job is not in the uninvoiced queue" });
         }
       }
@@ -73,7 +75,7 @@ export const invoicesRouter = router({
               description: line.description,
               quantity: line.quantity,
               rate: line.rate,
-              amount: line.quantity * line.rate,
+              amount: computeLineAmount(line.quantity, line.rate),
               lineType: line.lineType,
               notes: line.notes,
               sortOrder: i,
@@ -98,7 +100,7 @@ export const invoicesRouter = router({
         where: { id: input.invoiceId, orgId: ctx.orgId },
       });
       if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
-      if (invoice.status !== "DRAFT") {
+      if (!canEditInvoiceLines(invoice.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only draft invoices can be edited" });
       }
 
@@ -113,7 +115,7 @@ export const invoicesRouter = router({
             description: line.description,
             quantity: line.quantity,
             rate: line.rate,
-            amount: line.quantity * line.rate,
+            amount: computeLineAmount(line.quantity, line.rate),
             lineType: line.lineType,
             notes: line.notes,
             sortOrder: i,
@@ -143,7 +145,7 @@ export const invoicesRouter = router({
       include: { job: true },
     });
     if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
-    if (invoice.status !== "DRAFT") {
+    if (!canFinalizeInvoice(invoice.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Invoice already finalized" });
     }
 
@@ -172,7 +174,7 @@ export const invoicesRouter = router({
   retrySync: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const invoice = await ctx.prisma.invoice.findUnique({ where: { id: input.id, orgId: ctx.orgId } });
     if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
-    if (invoice.status === "DRAFT") {
+    if (!canRetrySyncInvoice(invoice.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Finalize the invoice before syncing" });
     }
     try {

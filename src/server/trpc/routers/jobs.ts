@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
+import { computeLineAmount } from "@/lib/totals";
+import { canCompleteJob, canDismissJob, canEditJobLines, canStartJob } from "@/lib/status-transitions";
 
 export const jobsRouter = router({
   /** The uninvoiced-work queue: everything done but not yet billed, oldest first. */
@@ -103,7 +105,7 @@ export const jobsRouter = router({
   start: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const job = await ctx.prisma.job.findUnique({ where: { id: input.id, orgId: ctx.orgId } });
     if (!job) throw new TRPCError({ code: "NOT_FOUND" });
-    if (job.status !== "SCHEDULED") {
+    if (!canStartJob(job.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Only scheduled jobs can be started" });
     }
     return ctx.prisma.job.update({ where: { id: input.id }, data: { status: "IN_PROGRESS" } });
@@ -113,7 +115,7 @@ export const jobsRouter = router({
   complete: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const job = await ctx.prisma.job.findUnique({ where: { id: input.id, orgId: ctx.orgId } });
     if (!job) throw new TRPCError({ code: "NOT_FOUND" });
-    if (job.status !== "SCHEDULED" && job.status !== "IN_PROGRESS") {
+    if (!canCompleteJob(job.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Only scheduled or in-progress jobs can be completed" });
     }
     return ctx.prisma.job.update({
@@ -127,7 +129,7 @@ export const jobsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const job = await ctx.prisma.job.findUnique({ where: { id: input.id, orgId: ctx.orgId } });
       if (!job) throw new TRPCError({ code: "NOT_FOUND" });
-      if (job.status !== "DONE_NOT_INVOICED") {
+      if (!canDismissJob(job.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only queued jobs can be dismissed" });
       }
       return ctx.prisma.job.update({
@@ -153,7 +155,7 @@ export const jobsRouter = router({
         include: { lines: true },
       });
       if (!job) throw new TRPCError({ code: "NOT_FOUND" });
-      if (job.status === "INVOICED") {
+      if (!canEditJobLines(job.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "This job is already invoiced" });
       }
       return ctx.prisma.jobLine.create({
@@ -163,7 +165,7 @@ export const jobsRouter = router({
           description: input.description,
           quantity: input.quantity,
           rate: input.rate,
-          amount: input.quantity * input.rate,
+          amount: computeLineAmount(input.quantity, input.rate),
           lineType: "CHANGE_ORDER",
           sortOrder: job.lines.length,
         },
@@ -175,7 +177,7 @@ export const jobsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const job = await ctx.prisma.job.findUnique({ where: { id: input.jobId, orgId: ctx.orgId } });
       if (!job) throw new TRPCError({ code: "NOT_FOUND" });
-      if (job.status === "INVOICED") {
+      if (!canEditJobLines(job.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "This job is already invoiced" });
       }
       await ctx.prisma.jobLine.delete({ where: { id: input.lineId, jobId: input.jobId } });
