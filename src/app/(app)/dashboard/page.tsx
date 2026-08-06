@@ -26,14 +26,21 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-neutral-900">Dashboard</h1>
-        <Link href="/queue/new" className={buttonVariants({})}>
-          Log a finished job
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/estimates/new" className={buttonVariants({ variant: "secondary" })}>
+            New estimate
+          </Link>
+          <Link href="/queue/new" className={buttonVariants({})}>
+            Log a finished job
+          </Link>
+        </div>
       </div>
 
       {!isLoading && stats && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <StatCard label="Scheduled today" value={String(stats.scheduledTodayCount)} />
           <StatCard label="Waiting to invoice" value={String(stats.uninvoicedCount)} />
+          <StatCard label="Estimates awaiting reply" value={String(stats.pendingEstimatesCount)} />
           <StatCard
             label="Invoiced this month"
             value={String(stats.invoicedThisMonthCount)}

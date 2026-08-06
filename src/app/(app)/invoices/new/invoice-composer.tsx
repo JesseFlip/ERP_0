@@ -29,13 +29,30 @@ export function InvoiceComposer({ jobId }: { jobId?: string }) {
   const { data: customers } = trpc.customers.list.useQuery();
   const { data: catalog } = trpc.catalog.list.useQuery();
 
-  // job loads asynchronously; until it resolves these fall back to its values below
-  // rather than syncing via an effect (which would cause a redundant re-render).
+  // job (and its planned/change-order lines from scheduling) loads asynchronously;
+  // these fall back to its values below rather than syncing via an effect.
   const [customerIdOverride, setCustomerIdOverride] = useState<string | null>(null);
   const [memoOverride, setMemoOverride] = useState<string | null>(null);
+  const [linesOverride, setLinesOverride] = useState<Line[] | null>(null);
   const customerId = customerIdOverride ?? job?.customerId ?? "";
   const memo = memoOverride ?? job?.name ?? "";
-  const [lines, setLines] = useState<Line[]>([emptyLine()]);
+
+  const defaultLines: Line[] = job
+    ? job.lines.length > 0
+      ? job.lines.map((l) => ({
+          key: l.id,
+          catalogItemId: l.catalogItemId ?? undefined,
+          description: l.description,
+          quantity: Number(l.quantity),
+          rate: Number(l.rate),
+          lineType: l.lineType === "CHANGE_ORDER" ? "CHANGE_ORDER" : "STANDARD",
+        }))
+      : [emptyLine()]
+    : jobId
+      ? [] // job not loaded yet — avoid flashing a blank line that then gets replaced
+      : [emptyLine()];
+  const lines = linesOverride ?? defaultLines;
+
   const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,14 +65,14 @@ export function InvoiceComposer({ jobId }: { jobId?: string }) {
   const utils = trpc.useUtils();
 
   function updateLine(key: string, patch: Partial<Line>) {
-    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+    setLinesOverride(lines.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
 
   function addCatalogLine(catalogItemId: string) {
     const item = activeCatalog.find((c) => c.id === catalogItemId);
     if (!item) return;
-    setLines((prev) => [
-      ...prev,
+    setLinesOverride([
+      ...lines,
       {
         key: crypto.randomUUID(),
         catalogItemId: item.id,
@@ -133,7 +150,7 @@ export function InvoiceComposer({ jobId }: { jobId?: string }) {
                 disabled={Boolean(jobId)}
                 required
               >
-                <option value="">Select a customer…</option>
+                <option value="">{jobId ? "Loading…" : "Select a customer…"}</option>
                 {customers?.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -149,6 +166,12 @@ export function InvoiceComposer({ jobId }: { jobId?: string }) {
               <p className="text-xs text-neutral-500">
                 {job.attachments.length} photo{job.attachments.length > 1 ? "s" : ""} already attached
                 to this job.
+              </p>
+            )}
+            {job && job.lines.length > 0 && !linesOverride && (
+              <p className="text-xs text-neutral-500">
+                Lines below were carried over from this job{job.estimateId ? "'s estimate" : ""} —
+                edit freely before sending.
               </p>
             )}
           </CardContent>
@@ -210,7 +233,7 @@ export function InvoiceComposer({ jobId }: { jobId?: string }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setLines((prev) => prev.filter((l) => l.key !== line.key))}
+                  onClick={() => setLinesOverride(lines.filter((l) => l.key !== line.key))}
                   className="shrink-0 text-neutral-400 hover:text-red-600"
                   aria-label="Remove line"
                 >
@@ -220,7 +243,7 @@ export function InvoiceComposer({ jobId }: { jobId?: string }) {
             ))}
 
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setLines((prev) => [...prev, emptyLine()])}>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setLinesOverride([...lines, emptyLine()])}>
                 <Plus className="h-3.5 w-3.5" /> Custom line
               </Button>
               {activeCatalog.length > 0 && (

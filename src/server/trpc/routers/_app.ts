@@ -6,6 +6,8 @@ import { invoicesRouter } from "./invoices";
 import { qboRouter } from "./qbo";
 import { uploadsRouter } from "./uploads";
 import { dashboardRouter } from "./dashboard";
+import { crewsRouter } from "./crews";
+import { estimatesRouter } from "./estimates";
 
 export const appRouter = router({
   catalog: catalogRouter,
@@ -15,6 +17,8 @@ export const appRouter = router({
   qbo: qboRouter,
   uploads: uploadsRouter,
   dashboard: dashboardRouter,
+  crews: crewsRouter,
+  estimates: estimatesRouter,
 });
 
 export type AppRouter = typeof appRouter;

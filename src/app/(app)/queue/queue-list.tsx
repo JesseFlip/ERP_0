@@ -70,7 +70,7 @@ export function QueueList() {
           <div className="min-w-0">
             <p className="truncate font-medium text-neutral-900">{job.name}</p>
             <p className="text-sm text-neutral-500">
-              {job.customer.name} · done {formatDate(job.doneDate)}
+              {job.customer.name} · done {job.doneDate ? formatDate(job.doneDate) : "—"}
               {job.attachments.length > 0 ? ` · ${job.attachments.length} photo${job.attachments.length > 1 ? "s" : ""}` : ""}
             </p>
             {job.notes && <p className="mt-1 line-clamp-1 text-sm text-neutral-400">{job.notes}</p>}
