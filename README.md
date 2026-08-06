@@ -96,8 +96,9 @@ customer twice. See `src/lib/qbo/client.ts`.
 `src/lib/qbo/sync.ts` persists the invoice locally first; a failed push flags the
 invoice `NOT_POSTED` with the error visible on the invoice page and queues a
 `SyncJob` with exponential backoff. `/api/cron/qbo-sync` (wired up in `vercel.json`
-as a 10-minute Vercel Cron) drains that queue; the invoice page also has a manual
-**Retry now** button.
+as a daily Vercel Cron — Vercel's Hobby plan only allows daily cron schedules; bump
+this to every 10-15 minutes if you're on Pro) drains that queue; the invoice page
+also has a manual **Retry now** button for anyone who doesn't want to wait.
 
 ## Data model
 
