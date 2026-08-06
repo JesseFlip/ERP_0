@@ -16,6 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "PropertyOps",
   description: "Estimate, schedule, and run a job in the field, then bill it to QuickBooks in under 2 minutes.",
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({
