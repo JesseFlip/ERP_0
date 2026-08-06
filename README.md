@@ -1,5 +1,7 @@
 # PropertyOps
 
+[![CI](https://github.com/JesseFlip/ERP_0/actions/workflows/ci.yml/badge.svg)](https://github.com/JesseFlip/ERP_0/actions/workflows/ci.yml)
+
 Phases 1–3 of the Property Services Operations Platform spec (`PropertyOps_ERP_Spec.md`):
 estimate a job, schedule and run it in the field, and turn it into a correct QuickBooks
 Online invoice in under two minutes — with nothing ever silently lost if a QBO push fails.
@@ -96,8 +98,9 @@ customer twice. See `src/lib/qbo/client.ts`.
 `src/lib/qbo/sync.ts` persists the invoice locally first; a failed push flags the
 invoice `NOT_POSTED` with the error visible on the invoice page and queues a
 `SyncJob` with exponential backoff. `/api/cron/qbo-sync` (wired up in `vercel.json`
-as a 10-minute Vercel Cron) drains that queue; the invoice page also has a manual
-**Retry now** button.
+as a daily Vercel Cron — Vercel's Hobby plan only allows daily cron schedules; bump
+this to every 10-15 minutes if you're on Pro) drains that queue; the invoice page
+also has a manual **Retry now** button for anyone who doesn't want to wait.
 
 ## Data model
 
@@ -136,6 +139,23 @@ src/app/api/qbo/           OAuth start/callback + webhook routes
 src/app/api/cron/          retry-queue cron endpoint
 src/proxy.ts                route protection (Next.js 16 renamed middleware → proxy)
 ```
+
+## Testing
+
+```bash
+npm test         # vitest — unit tests for the state-machine logic and QBO idempotency
+npm run lint
+npx tsc --noEmit
+npm run build
+```
+
+`.github/workflows/ci.yml` runs all four on every push and PR. Unit tests cover the
+pieces most worth getting provably right rather than eyeballing: line-item totals
+(`src/lib/totals.ts`), every valid/invalid Job/Estimate/Invoice status transition
+(`src/lib/status-transitions.ts` — the actual state machine the routers enforce), and
+the QBO idempotency-key string-building (`src/lib/qbo/idempotency.ts`) that prevents
+double-billing on a retried push. There's no integration/e2e suite yet — the tRPC
+routers and UI are exercised via manual + agent-driven browser smoke tests instead.
 
 ## Deploying
 

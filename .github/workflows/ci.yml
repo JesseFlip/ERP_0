@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same branch so pushes don't queue up stale checks.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values so `next build` doesn't need a live database or real secrets —
+      # nothing here connects at build time, it just needs the vars to be present.
+      # See src/lib/prisma.ts (Prisma's Pool isn't opened until first query) and
+      # src/lib/auth.ts (AUTH_SECRET is only read inside request handlers).
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      AUTH_SECRET: ci-only-placeholder-secret-not-used-anywhere-real
+      CRON_SECRET: ci-only-placeholder-secret-not-used-anywhere-real
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

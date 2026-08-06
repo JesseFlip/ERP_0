@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { qboApiBase, QBO_MINOR_VERSION } from "./config";
 import { refreshTokens } from "./oauth";
+import { buildPrivateNote, idempotencyLookupClause } from "./idempotency";
 
 export class QboNotConnectedError extends Error {
   constructor() {
@@ -70,10 +71,6 @@ async function qboRequest<T>(
     throw new Error(`QBO API ${init.method ?? "GET"} ${path} failed (${res.status}): ${text}`);
   }
   return res.json() as Promise<T>;
-}
-
-function escapeQboString(value: string) {
-  return value.replace(/'/g, "\\'");
 }
 
 async function query<T>(orgId: string, entity: string, whereClause: string): Promise<T[]> {
@@ -156,19 +153,12 @@ export type QboInvoice = {
   PrivateNote?: string;
 };
 
-const IDEMPOTENCY_MARKER_PREFIX = "propertyops_idempotency_key:";
-
 /** Finds a previously-created invoice by our idempotency key, embedded in PrivateNote. */
 export async function findQboInvoiceByIdempotencyKey(
   orgId: string,
   idempotencyKey: string
 ): Promise<QboInvoice | null> {
-  const marker = `${IDEMPOTENCY_MARKER_PREFIX}${idempotencyKey}`;
-  const matches = await query<QboInvoice>(
-    orgId,
-    "Invoice",
-    `PrivateNote LIKE '%${escapeQboString(marker)}%'`
-  );
+  const matches = await query<QboInvoice>(orgId, "Invoice", idempotencyLookupClause(idempotencyKey));
   return matches[0] ?? null;
 }
 
@@ -188,9 +178,7 @@ export async function createQboInvoice(
   const existing = await findQboInvoiceByIdempotencyKey(orgId, input.idempotencyKey);
   if (existing) return existing;
 
-  const privateNote = [input.memo, `${IDEMPOTENCY_MARKER_PREFIX}${input.idempotencyKey}`]
-    .filter(Boolean)
-    .join("\n");
+  const privateNote = buildPrivateNote(input.memo, input.idempotencyKey);
 
   const result = await qboRequest<{ Invoice: QboInvoice }>(orgId, "/invoice", {
     method: "POST",
